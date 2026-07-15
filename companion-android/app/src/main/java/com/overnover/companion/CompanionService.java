@@ -29,11 +29,18 @@ public final class CompanionService extends Service {
     private static final int NOTIF_ID = 1;
     public static final int PORT = 8080;
 
+    static final String PREFS = "overnover_tunnel";
+    static final String KEY_WORKER_URL = "worker_url";
+
     private ApiServer server;
+    private RelayClient relay;
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
 
     public static volatile boolean running = false;
+    /** The relay (Worker) URL the app should use, once the relay is online. */
+    public static volatile String publicUrl = null;
+    public static volatile String tunnelStatus = "off";
 
     @Override
     public void onCreate() {
@@ -50,6 +57,11 @@ public final class CompanionService extends Service {
 
     @Override
     public int onStartCommand(final Intent intent, final int flags, final int startId) {
+        // Allow overriding the relay URL via a start extra (used for setup/testing).
+        if (intent != null && intent.hasExtra("worker_url")) {
+            getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putString(KEY_WORKER_URL, intent.getStringExtra("worker_url")).apply();
+        }
         startForeground(NOTIF_ID, buildNotification("Starting…"));
         acquireLocks();
         try {
@@ -59,11 +71,37 @@ public final class CompanionService extends Service {
             running = true;
             updateNotification("Serving on port " + PORT);
             Log.i(TAG, "companion server started on " + PORT);
+            startTunnel();
         } catch (final Exception e) {
             Log.e(TAG, "failed to start server: " + e.getMessage());
             updateNotification("Failed: " + e.getMessage());
         }
         return START_STICKY;
+    }
+
+    private void startTunnel() {
+        if (relay != null) {
+            return;
+        }
+        final String workerUrl = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_WORKER_URL, "")
+                .trim();
+        if (workerUrl.isEmpty()) {
+            tunnelStatus = "no relay URL set";
+            updateNotification("Serving locally — set relay URL in the app");
+            return;
+        }
+        relay = new RelayClient(workerUrl, PORT, status -> {
+            tunnelStatus = status;
+            if ("online".equals(status)) {
+                publicUrl = workerUrl;
+                updateNotification("Online via relay");
+            } else {
+                publicUrl = null;
+                updateNotification("Relay: " + status);
+            }
+        });
+        relay.start();
     }
 
     private void acquireLocks() {
@@ -128,6 +166,12 @@ public final class CompanionService extends Service {
     @Override
     public void onDestroy() {
         running = false;
+        if (relay != null) {
+            relay.stop();
+            relay = null;
+        }
+        publicUrl = null;
+        tunnelStatus = "off";
         if (server != null) {
             server.stop();
         }

@@ -1,0 +1,13 @@
+name = "overnover-relay"
+main = "src/worker.js"
+compatibility_date = "2026-07-01"
+
+# Durable Object holds the phone's WebSocket between requests.
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "Relay"
+
+# SQLite-backed DO class -> eligible for the free Workers plan.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Relay"]

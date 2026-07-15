@@ -45,8 +45,17 @@ adb install -r <that apk>
 `test-on-device.ps1` installs, starts the service, forwards the port over USB,
 and exercises every endpoint.
 
-## Remaining work
+## Remote access (the relay)
 
-- HTTPS tunnel for remote access (the HTTPS PWA can't call a plain-HTTP phone).
+The HTTPS PWA can't call a plain-HTTP phone behind NAT, and the Go-based tunnels
+(cloudflared/ngrok) can't resolve DNS on rootless Android 5/6. So the app opens
+an **outbound WebSocket** (via OkHttp, `RelayClient.java`) to a small Cloudflare
+Worker — see [`../worker`](../worker). That gives a stable
+`https://<name>.workers.dev` URL with no DNS/binary problems. Enter the relay URL
+in the app; it shows "Online" once connected. Validated end-to-end including
+seekable audio streaming.
+
+## Remaining polish
+
 - Faster offline downloads (chunked ranged fetch — googlevideo throttles single
   non-ranged pulls; ranged streaming is already full-speed).
