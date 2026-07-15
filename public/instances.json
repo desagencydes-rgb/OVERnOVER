@@ -1,0 +1,15 @@
+{
+  "updated": "2026-07-15",
+  "note": "Ordered by verified health on the update date. The app re-ranks by live health checks; edit + redeploy to refresh without an app update.",
+  "instances": [
+    { "url": "https://api.piped.private.coffee", "kind": "piped" },
+    { "url": "https://invidious.materialio.us", "kind": "invidious" },
+    { "url": "https://inv.zoomerville.com", "kind": "invidious" },
+    { "url": "https://pipedapi.kavin.rocks", "kind": "piped" },
+    { "url": "https://pipedapi.adminforge.de", "kind": "piped" },
+    { "url": "https://invidious.private.coffee", "kind": "invidious" },
+    { "url": "https://yewtu.be", "kind": "invidious" },
+    { "url": "https://inv.nadeko.net", "kind": "invidious" },
+    { "url": "https://invidious.nerdvpn.de", "kind": "invidious" }
+  ]
+}

@@ -1,0 +1,43 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-accent: #ff375f;
+  --color-surface: #0a0a0a;
+  --color-raised: #171717;
+}
+
+html,
+body {
+  background: var(--color-surface);
+  color: #fafafa;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Hide scrollbars but keep scrolling (app-like feel) */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
