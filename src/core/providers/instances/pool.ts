@@ -47,9 +47,24 @@ export function rankInstances(states: InstanceState[]): InstanceState[] {
 export class InstancePool {
   private states: InstanceState[] = []
   private listeners = new Set<() => void>()
+  /**
+   * Stable snapshot for useSyncExternalStore. Rebuilt only when state actually
+   * changes; returning a fresh array on every getSnapshot call would make React
+   * loop forever and crash the tree.
+   */
+  private snapshot: InstanceState[] = []
 
   constructor(seed: Instance[] = []) {
     this.setInstances(seed)
+  }
+
+  private rebuildSnapshot(): void {
+    this.snapshot = this.states.map((s) => ({
+      instance: s.instance,
+      ok: s.ok,
+      latencyMs: s.latencyMs,
+      failCount: s.failCount,
+    }))
   }
 
   /** Load the instance list (bundled + remote-updatable) and persisted health. */
@@ -93,6 +108,7 @@ export class InstancePool {
         latencyMs: 0,
         failCount: 0,
       }))
+    this.rebuildSnapshot()
   }
 
   ranked(): InstanceState[] {
@@ -100,7 +116,7 @@ export class InstancePool {
   }
 
   all(): InstanceState[] {
-    return [...this.states]
+    return this.snapshot
   }
 
   reportSuccess(url: string): void {
@@ -152,6 +168,7 @@ export class InstancePool {
   }
 
   private notify(): void {
+    this.rebuildSnapshot()
     for (const fn of this.listeners) fn()
   }
 

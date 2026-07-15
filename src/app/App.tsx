@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { boot } from './boot'
 import { TabBar } from './TabBar'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import { useUiStore } from '../state/uiStore'
 import { HomeView } from '../features/home/HomeView'
 import { SearchView } from '../features/search/SearchView'
@@ -42,10 +43,12 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <div className="flex h-dvh flex-col">
         <main className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
-          {tab === 'home' && <HomeView />}
-          {tab === 'search' && <SearchView />}
-          {tab === 'library' && <LibraryView />}
-          {tab === 'settings' && <SettingsView />}
+          <ErrorBoundary label="This screen hit an error">
+            {tab === 'home' && <HomeView />}
+            {tab === 'search' && <SearchView />}
+            {tab === 'library' && <LibraryView />}
+            {tab === 'settings' && <SettingsView />}
+          </ErrorBoundary>
         </main>
         <MiniPlayer />
         <TabBar />
