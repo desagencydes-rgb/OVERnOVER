@@ -1,6 +1,6 @@
 import type { StreamInfo, Track } from '../models/types'
 
-export type InstanceKind = 'piped' | 'invidious'
+export type InstanceKind = 'piped' | 'invidious' | 'companion'
 
 export interface Instance {
   url: string

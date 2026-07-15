@@ -13,7 +13,7 @@ export async function setSetting<T>(key: string, value: T): Promise<void> {
 export const PREF_DEFAULTS = {
   autoRadio: true,
   autoDownloadFavorites: true,
-  customInstances: [] as { url: string; kind: 'piped' | 'invidious' }[],
+  customInstances: [] as { url: string; kind: 'piped' | 'invidious' | 'companion' }[],
 }
 
 export type PrefKey = keyof typeof PREF_DEFAULTS

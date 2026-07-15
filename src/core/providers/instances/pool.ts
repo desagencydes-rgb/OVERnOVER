@@ -1,5 +1,6 @@
 import { getPref, getSetting, setSetting } from '../../storage/settings'
 import type { Instance } from '../types'
+import { CompanionProvider } from '../companion'
 import { InvidiousProvider } from '../invidious'
 import { PipedProvider } from '../piped'
 import type { SourceProvider } from '../types'
@@ -18,16 +19,26 @@ const HEALTH_KEY = 'instanceHealth'
 const PROBE_TIMEOUT = 5000
 
 export function providerFor(instance: Instance): SourceProvider {
-  return instance.kind === 'piped'
-    ? new PipedProvider(instance.url)
-    : new InvidiousProvider(instance.url)
+  switch (instance.kind) {
+    case 'companion':
+      return new CompanionProvider(instance.url)
+    case 'piped':
+      return new PipedProvider(instance.url)
+    default:
+      return new InvidiousProvider(instance.url)
+  }
 }
 
-/** Healthy-and-fast first, then unknown, then failing (still retried last). */
+/**
+ * Companion server first (the user's own reliable source), then healthy-and-fast
+ * public instances, then unknown, then failing (still retried last). A companion
+ * is only preferred while it's actually reachable — a dead one demotes normally.
+ */
 export function rankInstances(states: InstanceState[]): InstanceState[] {
   const score = (s: InstanceState) => {
-    if (s.ok === true) return s.latencyMs
-    if (s.ok === null) return 100_000 + s.failCount
+    const companionBonus = s.instance.kind === 'companion' && s.ok !== false ? -1_000_000 : 0
+    if (s.ok === true) return companionBonus + s.latencyMs
+    if (s.ok === null) return companionBonus + 100_000 + s.failCount
     return 1_000_000 + s.failCount * 1000
   }
   return [...states].sort((a, b) => score(a) - score(b))

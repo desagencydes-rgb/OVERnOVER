@@ -29,6 +29,7 @@ export function SettingsView() {
         <h1 className="py-3 text-2xl font-bold">Settings</h1>
       </div>
       <StorageSection />
+      <CompanionSection />
       <PlaybackSection />
       <SourcesSection />
       <DataSection />
@@ -104,6 +105,108 @@ function Toggle({ prefKey, label, hint }: { prefKey: PrefKey; label: string; hin
         />
       </span>
     </button>
+  )
+}
+
+function CompanionSection() {
+  const [busy, setBusy] = useState(false)
+  const companion = useLiveQuery(async () => {
+    const custom = await getPref('customInstances')
+    return custom.find((c) => c.kind === 'companion') ?? null
+  }, [], null)
+
+  const state = useSyncExternalStore(
+    useCallback((cb: () => void) => pool.subscribe(cb), []),
+    () => pool.all().find((s) => s.instance.kind === 'companion') ?? null,
+  )
+
+  const save = async (raw: string) => {
+    const url = raw.trim().replace(/\/$/, '')
+    if (url && !/^https?:\/\//.test(url)) {
+      alert('Enter the full URL including https://')
+      return
+    }
+    setBusy(true)
+    const custom = await getPref('customInstances')
+    const withoutCompanion = custom.filter((c) => c.kind !== 'companion')
+    await setPref(
+      'customInstances',
+      url ? [{ url, kind: 'companion' }, ...withoutCompanion] : withoutCompanion,
+    )
+    await pool.init()
+    await pool.healthCheckAll()
+    setBusy(false)
+  }
+
+  const status = !companion
+    ? null
+    : state?.ok === true
+      ? { color: 'text-green-400', text: `Connected · ${state.latencyMs}ms` }
+      : state?.ok === false
+        ? { color: 'text-red-400', text: 'Unreachable — is the phone on and the tunnel running?' }
+        : { color: 'text-neutral-400', text: 'Not tested yet' }
+
+  return (
+    <section>
+      <SectionTitle>Companion server</SectionTitle>
+      <div className="mx-4 rounded-xl bg-raised p-4">
+        <p className="text-[13px] text-neutral-400">
+          Your own phone-hosted server for reliable search, streaming and downloads. When it's
+          reachable it's used first; otherwise the app falls back to public sources and your saved
+          library.
+        </p>
+        {companion ? (
+          <>
+            <p className="mt-3 truncate text-[14px] font-medium">
+              {companion.url.replace(/^https?:\/\//, '')}
+            </p>
+            {status && <p className={cn('mt-0.5 text-[13px]', status.color)}>{status.text}</p>}
+            <div className="mt-3 flex gap-2">
+              <button
+                disabled={busy}
+                onClick={() => {
+                  const next = prompt('Companion server URL', companion.url)
+                  if (next !== null) void save(next)
+                }}
+                className="rounded-full bg-neutral-700 px-4 py-2 text-[13px] font-medium disabled:opacity-50"
+              >
+                Change
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true)
+                  void pool.healthCheckAll().finally(() => setBusy(false))
+                }}
+                className="rounded-full bg-neutral-700 px-4 py-2 text-[13px] font-medium disabled:opacity-50"
+              >
+                Test
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  if (confirm('Remove companion server?')) void save('')
+                }}
+                className="rounded-full bg-neutral-700 px-4 py-2 text-[13px] font-medium text-red-400 disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </div>
+          </>
+        ) : (
+          <button
+            disabled={busy}
+            onClick={() => {
+              const url = prompt('Companion server URL (e.g. https://your-name.ngrok-free.app)')
+              if (url) void save(url)
+            }}
+            className="mt-3 rounded-full bg-accent px-5 py-2 text-[14px] font-semibold text-white disabled:opacity-50"
+          >
+            Connect companion server
+          </button>
+        )}
+      </div>
+    </section>
   )
 }
 
