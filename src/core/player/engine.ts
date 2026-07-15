@@ -226,6 +226,7 @@ export class PlayerEngine {
 
   private async loadCurrent(autoplay: boolean): Promise<void> {
     const token = ++this.loadToken
+    this.needsLoad = false
     const track = currentTrack(playerStore.getState())
     if (!track) return
 
