@@ -6,10 +6,12 @@ import org.json.JSONObject;
 
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -39,6 +41,8 @@ public final class RelayClient {
     private final OkHttpClient wsClient;
     private final OkHttpClient localClient;
     private final ExecutorService pool = Executors.newCachedThreadPool();
+    /** In-flight local calls by request id, so a client abort (seek) can cancel them. */
+    private final ConcurrentHashMap<Integer, Call> active = new ConcurrentHashMap<>();
 
     private volatile boolean running = false;
     private volatile WebSocket socket;
@@ -98,7 +102,20 @@ public final class RelayClient {
 
             @Override
             public void onMessage(final WebSocket ws, final String text) {
-                pool.execute(() -> handleRequest(ws, text));
+                try {
+                    final JSONObject msg = new JSONObject(text);
+                    final String t = msg.optString("t");
+                    if ("req".equals(t)) {
+                        pool.execute(() -> handleRequest(ws, msg));
+                    } else if ("cancel".equals(t)) {
+                        final Call c = active.get(msg.optInt("id", -1));
+                        if (c != null) {
+                            c.cancel();
+                        }
+                    }
+                } catch (final Exception e) {
+                    Log.w(TAG, "bad message: " + e);
+                }
             }
 
             @Override
@@ -129,51 +146,77 @@ public final class RelayClient {
         connect();
     }
 
-    private void handleRequest(final WebSocket ws, final String text) {
+    private void handleRequest(final WebSocket ws, final JSONObject msg) {
         int id = -1;
+        Call call = null;
+        boolean isStream = false;
+        boolean headSent = false;
         try {
-            final JSONObject msg = new JSONObject(text);
-            if (!"req".equals(msg.optString("t"))) {
-                return;
-            }
             id = msg.getInt("id");
             final String path = msg.getString("path");
             final JSONObject headers = msg.optJSONObject("headers");
+            isStream = path.startsWith("/stream/");
 
             final Request.Builder rb = new Request.Builder()
                     .url("http://127.0.0.1:" + localPort + path);
             if (headers != null && headers.has("range")) {
                 rb.header("Range", headers.getString("range"));
             }
+            call = localClient.newCall(rb.build());
 
-            try (Response resp = localClient.newCall(rb.build()).execute()) {
+            if (isStream) {
+                // A new stream supersedes any previous one — the player streams a
+                // single track at a time, and an iOS seek opens a fresh request.
+                // Cancelling the old stream stops it clogging the relay socket
+                // (which is what made seeking play silently).
+                for (final Call prev : active.values()) {
+                    prev.cancel();
+                }
+                active.put(id, call);
+            }
+
+            try (Response resp = call.execute()) {
                 final JSONObject head = new JSONObject();
                 head.put("t", "head");
                 head.put("id", id);
                 head.put("status", resp.code());
                 final JSONObject hOut = new JSONObject();
                 copyHeader(resp, hOut, "Content-Type");
-                // NOTE: Content-Length is deliberately NOT forwarded — the relay
-                // streams the body, so a fixed length would conflict.
+                copyHeader(resp, hOut, "Content-Length");
                 copyHeader(resp, hOut, "Content-Range");
                 copyHeader(resp, hOut, "Accept-Ranges");
                 head.put("headers", hOut);
                 ws.send(head.toString());
+                headSent = true;
 
                 final ResponseBody body = resp.body();
                 if (body != null) {
                     streamBody(ws, id, body.byteStream());
                 }
-                ws.send(endFrame(id));
             }
+            ws.send(endFrame(id));
         } catch (final Throwable t) {
-            Log.w(TAG, "request " + id + " failed: " + t);
-            if (id >= 0) {
+            final boolean cancelled = call != null && call.isCanceled();
+            if (headSent) {
+                // Head already sent; tell the relay to finish so it frees the request.
                 try {
-                    ws.send(errFrame(id, String.valueOf(t)));
+                    ws.send(endFrame(id));
                 } catch (final Throwable ignored) {
                     /* socket gone */
                 }
+            } else if (id >= 0) {
+                if (!cancelled) {
+                    Log.w(TAG, "request " + id + " failed: " + t);
+                }
+                try {
+                    ws.send(errFrame(id, cancelled ? "superseded" : String.valueOf(t)));
+                } catch (final Throwable ignored) {
+                    /* socket gone */
+                }
+            }
+        } finally {
+            if (isStream && id >= 0) {
+                active.remove(id);
             }
         }
     }

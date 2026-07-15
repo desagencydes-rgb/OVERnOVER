@@ -77,15 +77,16 @@ export class Relay {
     }
 
     const id = this.nextId++
-    const { readable, writable } = new TransformStream()
-    const writer = writable.getWriter()
     let resolveHead
     let rejectHead
     const headPromise = new Promise((res, rej) => {
       resolveHead = res
       rejectHead = rej
     })
-    const entry = { resolveHead, rejectHead, writer, headSent: false }
+    // Stream is created when the head arrives (we need its Content-Length to
+    // decide between FixedLengthStream — which preserves Content-Length so iOS
+    // treats audio as seekable — and a plain chunked TransformStream).
+    const entry = { resolveHead, rejectHead, controller: null, headSent: false }
     this.pending.set(id, entry)
 
     const headers = {}
@@ -110,15 +111,24 @@ export class Relay {
     } catch (e) {
       clearTimeout(timeout)
       this.pending.delete(id)
-      try {
-        writer.abort()
-      } catch (err) {
-        /* ignore */
-      }
       return json({ error: 'companion timeout' }, 504)
     }
     clearTimeout(timeout)
-    return new Response(readable, { status: head.status, headers: cors(head.headers) })
+    return new Response(head.readable, { status: head.status, headers: cors(head.headers) })
+  }
+
+  cancel(id) {
+    const p = this.pending.get(id)
+    if (!p) return
+    this.pending.delete(id)
+    // Don't touch p.controller here — it's already being cancelled by the client.
+    if (this.phone) {
+      try {
+        this.phone.send(JSON.stringify({ t: 'cancel', id }))
+      } catch (e) {
+        /* socket gone */
+      }
+    }
   }
 
   onPhoneMessage(ev) {
@@ -129,14 +139,36 @@ export class Relay {
         const p = this.pending.get(msg.id)
         if (!p) return
         if (msg.t === 'head') {
+          const headers = msg.headers || {}
+          // ReadableStream.cancel() fires when the client aborts the response —
+          // which is exactly what an iOS seek does. That's our reliable signal to
+          // tell the phone to stop streaming the abandoned request.
+          let controller
+          const readable = new ReadableStream({
+            start: (c) => {
+              controller = c
+            },
+            cancel: () => this.cancel(msg.id),
+          })
+          p.controller = controller
           p.headSent = true
-          p.resolveHead({ status: msg.status, headers: msg.headers || {} })
+          p.resolveHead({ status: msg.status, headers, readable })
         } else if (msg.t === 'end') {
-          p.writer.close().catch(() => {})
+          try {
+            if (p.controller) p.controller.close()
+          } catch (e) {
+            /* already closed/cancelled */
+          }
           this.pending.delete(msg.id)
         } else if (msg.t === 'err') {
           if (!p.headSent) p.rejectHead(new Error(msg.msg || 'error'))
-          else p.writer.abort().catch(() => {})
+          else if (p.controller) {
+            try {
+              p.controller.error(new Error(msg.msg || 'error'))
+            } catch (e) {
+              /* ignore */
+            }
+          }
           this.pending.delete(msg.id)
         }
       } else if (data instanceof ArrayBuffer) {
@@ -158,8 +190,13 @@ export class Relay {
     const view = new DataView(ab)
     const id = view.getUint32(0)
     const p = this.pending.get(id)
-    if (!p) return
-    p.writer.write(new Uint8Array(ab, 4)).catch((e) => console.error('write', e))
+    if (!p || !p.controller) return
+    try {
+      p.controller.enqueue(new Uint8Array(ab, 4))
+    } catch (e) {
+      // Enqueue throws once the stream is cancelled/closed — client is gone.
+      this.cancel(id)
+    }
   }
 
   failAll(reason) {
@@ -170,8 +207,12 @@ export class Relay {
         } catch (e) {
           /* ignore */
         }
-      } else {
-        p.writer.abort().catch(() => {})
+      } else if (p.controller) {
+        try {
+          p.controller.error(new Error(reason))
+        } catch (e) {
+          /* ignore */
+        }
       }
     }
     this.pending.clear()
